@@ -192,7 +192,10 @@ def main():
             args=(containers_queue, containers_stats,),
             name='worker-{}'.format(th_id),
         )
-        worker.setDaemon(True)
+        if sys.version_info < (3, 10, 0):
+            worker.setDaemon(True)
+        else:
+            worker.daemon = True
         worker.start()
 
     containers_queue.join()
