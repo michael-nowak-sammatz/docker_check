@@ -25,10 +25,12 @@ except ImportError as error:
     sys.exit(1)
 
 __author__ = 'El Acheche Anis aka elacheche'
-__contributors__ = ['Renato Covarrubias aka rnt', 'yulius-fxpal', 'Markus W. aka markwell-ch']
+__contributors__ = ['Renato Covarrubias aka rnt', 'yulius-fxpal', 'Markus W. aka markwell-ch', 'Michael N. aka mmichaa']
 __license__ = 'GPLv3'
-__version__ = '2020-12-23'
+__version__ = '2022-11-21'
 
+container_status_critical = ['removing', 'paused', 'exited', 'dead', 'not_found']
+container_status_warning = ['created', 'restarting']
 
 def get_ct_stats(container):
     '''Get container status'''
@@ -121,6 +123,7 @@ def get_ct_metrics(container_queue, containers_stats):
         net_in, net_out = get_net_io(stats)
         disk_in, disk_out = get_disk_io(stats)
 
+        containers_stats['%s_status' % container.name] = container.status
         containers_stats['%s_mem_pct' % container.name] = mem_pct
         containers_stats['%s_cpu_pct' % container.name] = cpu_pct
         containers_stats['%s_net_in' % container.name] = net_in
@@ -162,7 +165,10 @@ def main():
                         help='warning percentage (default 50)', default=50)
     parser.add_argument('-c', '--critical', type=int,
                         help='critcal percentage (default 80)', default=80)
+    parser.add_argument('-C', '--container', action='append', default=[],
+                        help='container (ID or name) expected to be running')
     args = parser.parse_args()
+    logging.debug('args = %s', args)
 
     # Try to use the lastest API version otherwise use
     # the installed client API version
@@ -184,6 +190,14 @@ def main():
         containers_queue.put(container)
 
     containers_stats = {}
+
+    # Check for required running containers
+    for container_thing in args.container:
+        try:
+                container = client.containers.get(container_thing)
+                # containers_stats["%s_status" % container.name] = container.status
+        except docker.errors.NotFound:
+                containers_stats['%s_status' % container_thing] = 'not_found'
 
     # Set up some threads to fetch the enclosures
     for th_id in range(len(containers_list)):
@@ -207,18 +221,26 @@ def main():
         in containers_stats.items()
         if k.endswith('_mem_pct') or k.endswith('_cpu_pct')
     }
+    status = {
+        k: v
+        for k, v
+        in containers_stats.items()
+        if k.endswith('_status')
+    }
     logging.debug("stats = %s", stats)
 
     # Check stats values and output perfdata
     critical_ct = {k: v for k, v in stats.items() if v > args.critical}
-    if critical_ct:
+    critical_ct2 = {k: v for k, v in status.items() if v in container_status_critical}
+    if critical_ct or critical_ct2:
         print("CRITICAL: %s | %s" % (
             get_ct_stats_message(critical_ct),
             get_ct_perfdata_message(containers_stats)))
         sys.exit(2)
 
     warning_ct = {k: v for k, v in stats.items() if v > args.warning}
-    if warning_ct:
+    warning_ct2 = {k: v for k, v in stats.items() if v in container_status_warning}
+    if warning_ct or warning_ct2:
         print("WARNING: %s | %s" % (
             get_ct_stats_message(warning_ct),
             get_ct_perfdata_message(containers_stats)))
